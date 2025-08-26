@@ -12,6 +12,16 @@ export interface FAQ {
   answer: string;
 }
 
+export interface Competitor {
+  title: string;
+  url: string;
+}
+
+export interface CompetitorAnalysis {
+  targetKeyword: string;
+  competitors: Competitor[];
+}
+
 export interface OptimizationPlan {
   metaTitle: string;
   metaDescription: string;
@@ -23,4 +33,5 @@ export interface OptimizationPlan {
   contentStrategyFramework: string;
   blogIdeas: string[];
   internalLinking: string;
+  competitorAnalysis: CompetitorAnalysis;
 }

@@ -1,13 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { KeywordData } from '../types';
 import { getKeywordsVolume } from '../services/dataForSeoService';
+import { suggestPrimaryKeyword } from '../services/geminiService';
 import EditIcon from './icons/EditIcon';
 import TrashIcon from './icons/TrashIcon';
 import PlusIcon from './icons/PlusIcon';
 
 interface Step2KeywordsProps {
   initialKeywords: KeywordData[];
-  onApprove: (keywords: string[]) => void;
+  onApprove: (keywords: KeywordData[], primaryKeyword: string) => void;
   onRegenerate: () => void;
 }
 
@@ -20,9 +21,30 @@ const Step2Keywords: React.FC<Step2KeywordsProps> = ({ initialKeywords, onApprov
   const [newKeyword, setNewKeyword] = useState('');
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [editingValue, setEditingValue] = useState('');
+  const [primaryKeyword, setPrimaryKeyword] = useState<string | null>(null);
+  const [isSuggesting, setIsSuggesting] = useState<boolean>(true);
 
   useEffect(() => {
     setKeywords(initialKeywords);
+    if (initialKeywords.length > 0) {
+        setIsSuggesting(true);
+        setPrimaryKeyword(null);
+        suggestPrimaryKeyword(initialKeywords)
+            .then(suggested => {
+                setPrimaryKeyword(suggested);
+            })
+            .catch(err => {
+                console.error("Failed to suggest primary keyword", err);
+                if (initialKeywords.length > 0) {
+                    setPrimaryKeyword(initialKeywords[0].text);
+                }
+            })
+            .finally(() => {
+                setIsSuggesting(false);
+            });
+    } else {
+        setIsSuggesting(false);
+    }
   }, [initialKeywords]);
 
   const handleAddKeyword = async () => {
@@ -52,7 +74,12 @@ const Step2Keywords: React.FC<Step2KeywordsProps> = ({ initialKeywords, onApprov
   };
 
   const handleRemoveKeyword = (index: number) => {
-    setKeywords(keywords.filter((_, i) => i !== index));
+    const removedKeyword = keywords[index];
+    setKeywords(currentKeywords => currentKeywords.filter((_, i) => i !== index));
+    // If the removed keyword was the primary one, unset it
+    if (removedKeyword.text === primaryKeyword) {
+      setPrimaryKeyword(null);
+    }
   };
   
   const startEditing = (index: number, value: string) => {
@@ -70,6 +97,11 @@ const Step2Keywords: React.FC<Step2KeywordsProps> = ({ initialKeywords, onApprov
       setEditingIndex(null);
       
       if (trimmedValue && trimmedValue.toLowerCase() !== originalKeywordData.text.toLowerCase()) {
+        // If the edited keyword was primary, update the primary keyword state
+        if(originalKeywordData.text === primaryKeyword) {
+          setPrimaryKeyword(trimmedValue);
+        }
+        
         setKeywords(currentKeywords => {
             const updated = [...currentKeywords];
             updated[index] = { ...updated[index], text: trimmedValue, volume: null, loading: true };
@@ -111,18 +143,31 @@ const Step2Keywords: React.FC<Step2KeywordsProps> = ({ initialKeywords, onApprov
     <div className="bg-slate-900/50 backdrop-blur-xl border border-slate-700/50 shadow-2xl shadow-blue-500/10 rounded-2xl p-6 sm:p-8">
       <div className="text-center mb-6">
           <h2 className="text-2xl font-bold text-slate-100">Step 2: Review & Approve Keywords</h2>
-          <p className="text-slate-400 mt-1">Review keywords and their search volume. Edit, add, or remove to refine the list.</p>
+          <p className="text-slate-400 mt-1">Select your primary keyword for competitor analysis, then refine your list.</p>
       </div>
 
       <div className="flex items-center text-sm font-semibold text-slate-400 px-3 pb-3 mb-3 border-b-2 border-slate-700/80">
-        <span className="flex-grow">Keyword</span>
+        <span className="w-12 text-center">Primary</span>
+        <span className="flex-grow pl-4">Keyword</span>
         <span className="w-32 text-right">Monthly Volume</span>
         <span className="w-16 ml-4"></span> {/* Spacer for actions */}
       </div>
 
       <div className="space-y-2 mb-6 max-h-[40vh] overflow-y-auto pr-2 -mr-2">
         {keywords.map((keyword, index) => (
-          <div key={keyword.text + index} className="flex items-center bg-slate-800/60 p-3 rounded-lg group transition-all duration-300 hover:bg-slate-700/80 hover:shadow-lg">
+          <div key={keyword.text + index} className={`flex items-center bg-slate-800/60 p-3 rounded-lg group transition-all duration-300 hover:bg-slate-700/80 hover:shadow-lg ${primaryKeyword === keyword.text ? 'ring-2 ring-cyan-500' : ''}`}>
+             <div className="w-12 flex justify-center">
+                <input
+                    type="radio"
+                    name="primary-keyword"
+                    value={keyword.text}
+                    checked={primaryKeyword === keyword.text}
+                    onChange={() => setPrimaryKeyword(keyword.text)}
+                    disabled={isSuggesting}
+                    className="appearance-none h-5 w-5 bg-slate-700 border-2 border-slate-600 rounded-full checked:bg-cyan-500 checked:border-cyan-400 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-slate-800 focus:ring-cyan-500 cursor-pointer transition"
+                    aria-label={`Set ${keyword.text} as primary keyword`}
+                />
+            </div>
             {editingIndex === index ? (
               <input
                 type="text"
@@ -130,12 +175,12 @@ const Step2Keywords: React.FC<Step2KeywordsProps> = ({ initialKeywords, onApprov
                 onChange={handleEditChange}
                 onBlur={() => saveEdit(index)}
                 onKeyDown={(e) => handleEditKeyDown(e, index)}
-                className="flex-grow bg-slate-700 text-white px-2 py-1 rounded-md focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                className="flex-grow bg-slate-700 text-white px-2 py-1 rounded-md focus:outline-none focus:ring-2 focus:ring-cyan-500 ml-4"
                 autoFocus
               />
             ) : (
               <>
-                <span className="flex-grow text-slate-200">{keyword.text}</span>
+                <span className="flex-grow text-slate-200 pl-4">{keyword.text}</span>
                 <span className="w-32 text-right font-mono flex justify-end items-center h-6 text-cyan-400">
                   {keyword.loading ? (
                     <MiniSpinner />
@@ -177,7 +222,7 @@ const Step2Keywords: React.FC<Step2KeywordsProps> = ({ initialKeywords, onApprov
         <button onClick={onRegenerate} className="w-full bg-slate-700 hover:bg-slate-600 text-white font-bold py-3 px-4 rounded-lg transition-colors duration-300">
             Regenerate
         </button>
-        <button onClick={() => onApprove(keywords.map(k => k.text))} className="w-full bg-gradient-to-r from-cyan-500 to-blue-600 text-white font-bold py-3 px-4 rounded-lg hover:from-cyan-400 hover:to-blue-500 transition-all duration-300 shadow-xl shadow-cyan-500/20">
+        <button onClick={() => onApprove(keywords, primaryKeyword!)} disabled={!primaryKeyword} className="w-full bg-gradient-to-r from-cyan-500 to-blue-600 text-white font-bold py-3 px-4 rounded-lg hover:from-cyan-400 hover:to-blue-500 transition-all duration-300 shadow-xl shadow-cyan-500/20 disabled:opacity-50 disabled:cursor-not-allowed">
             Approve & Generate Plan
         </button>
       </div>

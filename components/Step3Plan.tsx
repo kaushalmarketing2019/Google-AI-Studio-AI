@@ -58,6 +58,30 @@ const Step3Plan: React.FC<Step3PlanProps> = ({ plan, onStartOver }) => {
         </div>
       </InfoCard>
 
+      <InfoCard title="SERP Competitor Analysis">
+        <div className="text-slate-300">
+            <p className="mb-4">
+                Top organic search results for the primary commercial keyword:
+                <strong className="text-cyan-300 font-mono bg-slate-800/80 px-2 py-1 rounded ml-2">{plan.competitorAnalysis.targetKeyword}</strong>
+            </p>
+            {plan.competitorAnalysis.competitors.length > 0 ? (
+                <ol className="list-decimal list-inside space-y-4 text-slate-300">
+                    {plan.competitorAnalysis.competitors.map((competitor, index) => (
+                        <li key={index} className="leading-tight">
+                            <span className="font-semibold text-slate-200">{competitor.title}</span>
+                            <br />
+                            <a href={competitor.url} target="_blank" rel="noopener noreferrer" className="text-cyan-400 hover:text-cyan-300 text-sm break-all transition-colors underline decoration-cyan-400/30 hover:decoration-cyan-300/50">
+                                {competitor.url}
+                            </a>
+                        </li>
+                    ))}
+                </ol>
+            ) : (
+                <p>No competitor data could be retrieved for this keyword.</p>
+            )}
+        </div>
+      </InfoCard>
+
       <InfoCard title="Frequently Asked Questions (FAQs)">
         <div className="space-y-3">
             {plan.faqs.map((faq, i) => (

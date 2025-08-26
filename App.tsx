@@ -45,11 +45,11 @@ const App: React.FC = () => {
     }
   }, []);
 
-  const handleStep2Approve = useCallback(async (finalKeywords: string[]) => {
+  const handleStep2Approve = useCallback(async (finalKeywords: KeywordData[], primaryKeyword: string) => {
     setIsLoading(true);
     setError(null);
     try {
-      const plan = await generateOptimizationPlan(finalKeywords);
+      const plan = await generateOptimizationPlan(finalKeywords, primaryKeyword);
       setOptimizationPlan(plan);
       setStep(3);
     } catch (e) {

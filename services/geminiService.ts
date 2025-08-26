@@ -1,5 +1,5 @@
 import { GoogleGenAI, Type } from "@google/genai";
-import { InputType, OptimizationPlan, KeywordData } from '../types';
+import { InputType, OptimizationPlan, KeywordData, Competitor } from '../types';
 
 if (!process.env.API_KEY) {
   throw new Error("API_KEY environment variable not set");
@@ -50,7 +50,7 @@ export const generateKeywords = async (input: string, inputType: InputType): Pro
     try {
         const response = await ai.models.generateContent({
             model: 'gemini-2.5-flash',
-            contents: prompt,
+            contents: { parts: [{text: prompt}] },
             config: {
                 responseMimeType: "application/json",
                 responseSchema: keywordSchema,
@@ -67,22 +67,97 @@ export const generateKeywords = async (input: string, inputType: InputType): Pro
     }
 };
 
-export const generateOptimizationPlan = async (keywords: string[]): Promise<OptimizationPlan> => {
-    const prompt = `You are an expert SEO strategist. Based on the following approved keyword list: [${keywords.join(', ')}], generate a complete page optimization plan.`;
+const getSerpCompetitors = async (keyword: string): Promise<Competitor[]> => {
+    const prompt = `What are the top organic search results for "${keyword}"?`;
+
+    try {
+        const response = await ai.models.generateContent({
+            model: "gemini-2.5-flash",
+            contents: { parts: [{text: prompt}] },
+            config: {
+                tools: [{ googleSearch: {} }],
+            },
+        });
+
+        const groundingMetadata = response.candidates?.[0]?.groundingMetadata;
+
+        if (!groundingMetadata || !groundingMetadata.groundingChunks) {
+            console.warn(`No grounding metadata found for SERP competitor analysis on "${keyword}".`);
+            return [];
+        }
+
+        const competitors: Competitor[] = groundingMetadata.groundingChunks
+            .filter(chunk => chunk.web && chunk.web.uri && chunk.web.title)
+            .map(chunk => ({
+                title: chunk.web!.title!,
+                url: chunk.web!.uri!
+            }));
+            
+        return competitors.slice(0, 20);
+
+    } catch (error) {
+        console.error("Error fetching SERP competitors:", error);
+        return []; // Return empty array on error
+    }
+};
+
+export const suggestPrimaryKeyword = async (keywords: KeywordData[]): Promise<string> => {
+    const prompt = `From this list of keywords with search volumes, pick the one with the best commercial intent for a primary landing page target. Consider both search volume and the user's intent to purchase or inquire about a service. Respond with ONLY the single best keyword text, and nothing else.\n\nKeywords:\n${keywords.map(k => `- ${k.text} (Volume: ${k.volume?.toLocaleString() ?? 'N/A'})`).join('\n')}`;
     
     try {
         const response = await ai.models.generateContent({
             model: 'gemini-2.5-flash',
-            contents: prompt,
+            contents: { parts: [{text: prompt}] },
+        });
+        const suggestedKeyword = response.text.trim();
+        // Ensure the suggested keyword is actually in the list to prevent hallucination
+        const found = keywords.find(k => k.text.toLowerCase() === suggestedKeyword.toLowerCase());
+        if (found) {
+            return found.text;
+        }
+        // Fallback to the keyword with the highest volume if suggestion is not in the list
+        const sortedByVolume = [...keywords].sort((a, b) => (b.volume ?? 0) - (a.volume ?? 0));
+        return sortedByVolume[0]?.text ?? "";
+
+    } catch (error) {
+        console.error("Error suggesting primary keyword:", error);
+        // Fallback to the highest volume keyword on error
+        const sortedByVolume = [...keywords].sort((a, b) => (b.volume ?? 0) - (a.volume ?? 0));
+        return sortedByVolume[0]?.text ?? "";
+    }
+};
+
+export const generateOptimizationPlan = async (keywords: KeywordData[], primaryKeyword: string): Promise<OptimizationPlan> => {
+    try {
+        if (!primaryKeyword) {
+            throw new Error("A primary keyword must be selected for competitor analysis.");
+        }
+        // Step 1: Get the top 20 competitors for the user-selected primary keyword
+        const competitors = await getSerpCompetitors(primaryKeyword);
+        
+        // Step 2: Generate the main optimization plan
+        const planPrompt = `You are an expert SEO strategist. Based on the following approved keyword list: [${keywords.map(k => k.text).join(', ')}], with a primary focus on "${primaryKeyword}", generate a complete page optimization plan.`;
+        
+        const planResponse = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: { parts: [{ text: planPrompt }] },
             config: {
                 responseMimeType: "application/json",
                 responseSchema: optimizationPlanSchema,
             },
         });
 
-        const jsonString = response.text.trim();
-        const plan = JSON.parse(jsonString);
-        return plan as OptimizationPlan;
+        const jsonString = planResponse.text.trim();
+        const plan = JSON.parse(jsonString) as Omit<OptimizationPlan, 'competitorAnalysis'>;
+
+        // Step 3: Combine all data and return
+        return {
+            ...plan,
+            competitorAnalysis: {
+                targetKeyword: primaryKeyword,
+                competitors,
+            }
+        };
 
     } catch (error) {
         console.error("Error generating optimization plan:", error);
@@ -110,7 +185,7 @@ export const getMockKeywordVolume = async (keywords: string[]): Promise<KeywordD
     try {
         const response = await ai.models.generateContent({
             model: 'gemini-2.5-flash',
-            contents: prompt,
+            contents: { parts: [{ text: prompt }] },
             config: {
                 responseMimeType: "application/json",
                 responseSchema: mockVolumeSchema,
